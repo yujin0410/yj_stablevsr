@@ -962,7 +962,8 @@ def main(args):
 
                 # 1000스텝마다 디버그 로깅 (main process만)
                 if global_step % 1000 == 0 and accelerator.is_main_process:
-                    print(f"\n--- [Step {global_step} Warping Stats Check] ---")
+                    cur_t = timesteps[0].item()
+                    print(f"\n--- [Step {global_step} Warping Stats Check] (timestep[0]={cur_t}, T_THRESH=200) ---")
                     orig_mean = Yh_prev_list[0].abs().mean().item()
                     warp_mean = Yh_warped.abs().mean().item()
                     print(f"Original Yh Mean: {orig_mean:.6f} | Warped Yh Mean: {warp_mean:.6f}")
@@ -985,12 +986,16 @@ def main(args):
                             improvement = (error_before - error_after) / error_before * 100
                             print(f"결과: 워핑 성능 양호 ({improvement:.2f}% 개선)")
                         else:
-                            print(f" 경고: 워핑 후 오차가 더 큼")
+                            if cur_t >= 200:
+                                print(f" 참고: timestep={cur_t} >= 200 → x0 품질 낮아 워핑 오차 증가는 정상")
+                            else:
+                                print(f" 경고: timestep={cur_t} < 200인데도 워핑 후 오차 더 큼 (플로우 품질 점검 필요)")
                         print(f"{'='*50}\n")
 
                         accelerator.log({
                             "warp_error_before": error_before,
                             "warp_error_after": error_after,
+                            "warp_debug_timestep": cur_t,
                             "lambda_w": current_lambda_w
                         }, step=global_step)
 
