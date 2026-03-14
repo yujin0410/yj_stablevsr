@@ -12,10 +12,8 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-
 import warnings
 warnings.filterwarnings("ignore")
-
 import argparse
 import logging
 import math
@@ -25,7 +23,6 @@ import shutil
 from pathlib import Path
 from omegaconf import OmegaConf
 from dataset.reds_dataset import REDSRecurrentDataset
-
 import accelerate
 import numpy as np
 import torch
@@ -44,10 +41,9 @@ from transformers import AutoTokenizer, PretrainedConfig
 from einops import rearrange
 from torchvision.models.optical_flow import raft_large, Raft_Large_Weights
 from util.flow_utils import get_flow, flow_warp
-
 from pytorch_wavelets import DTCWTForward, DTCWTInverse
 import torchvision.utils as vutils
-from models.sft import SFT_Module                   
+from models.sft import SFT_Module
 from util.dtcwt_warp import warp_dtcwt_high_bands
 import wandb
 import diffusers
@@ -56,35 +52,24 @@ from diffusers import (
     ControlNetModel,
     UNet2DConditionModel
 )
-
 from pipeline.stablevsr_pipeline import StableVSRPipeline
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from scheduler.ddpm_scheduler import DDPMScheduler
-
-
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.21.0.dev0")
-
 logger = get_logger(__name__)
-
 def image_grid(imgs, rows, cols):
     assert len(imgs) == rows * cols
-
     w, h = imgs[0].size
     grid = Image.new("RGB", size=(cols * w, rows * h))
-
     for i, img in enumerate(imgs):
         grid.paste(img, box=(i % cols * w, i // cols * h))
     return grid
-
-
 def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, accelerator, weight_dtype, step, of_model):
     logger.info("Running validation... ")
-
     controlnet = accelerator.unwrap_model(controlnet)
-
     pipeline = StableVSRPipeline.from_pretrained(
         args.pretrained_model_name_or_path,
         vae=vae,
@@ -96,18 +81,14 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
         revision=args.revision,
         torch_dtype=weight_dtype,
     )
-
     pipeline = pipeline.to(accelerator.device)
     # pipeline.set_progress_bar_config(disable=True)
-
     if args.enable_xformers_memory_efficient_attention:
         pipeline.enable_xformers_memory_efficient_attention()
-
     if args.seed is None:
         generator = None
     else:
         generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
-
     if len(args.validation_image) == len(args.validation_prompt):
         validation_images = args.validation_image
         validation_prompts = args.validation_prompt
@@ -121,9 +102,7 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
         raise ValueError(
             "number of `args.validation_image` and `args.validation_prompt` should be checked in `parse_args`"
         )
-
     image_logs = []
-
     for validation_prompt, validation_image in zip(validation_prompts, validation_images):
         frames = validation_image.split(';')
         for i, frame in enumerate(frames):
@@ -136,7 +115,6 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
             bottom = (height + lq_height)/2
             frame = frame.crop((left, top, right, bottom))
             frames[i] = frame
-
         for _ in range(args.num_validation_images):
             # with torch.autocast("cuda"):
             image = pipeline(
@@ -148,63 +126,45 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
         image_logs.append(
             {"images": images}
         )
-
     for tracker in accelerator.trackers:
         if tracker.name == "tensorboard":
             for log in image_logs:
                 images = log["images"]
-
                 formatted_images = []
-
                 for image in images:
                     formatted_images.append(np.asarray(image))
-
                 formatted_images = np.concatenate(formatted_images, axis=1)
                 formatted_images = np.expand_dims(formatted_images, 0)
-
                 tracker.writer.add_images("", formatted_images, step, dataformats="NHWC")
         elif tracker.name == "wandb":
             formatted_images = []
-
             for log in image_logs:
                 images = log["images"]
                 validation_prompt = log["validation_prompt"]
                 validation_image = log["validation_image"]
-
                 formatted_images.append(wandb.Image(validation_image, caption="Controlnet conditioning"))
-
                 for image in images:
                     image = wandb.Image(image, caption=validation_prompt)
                     formatted_images.append(image)
-
             tracker.log({"validation": formatted_images})
         else:
             logger.warn(f"image logging not implemented for {tracker.name}")
-
     return image_logs
-
-
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
-
     text_encoder_config = PretrainedConfig.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="text_encoder",
         revision=revision,
     )
     model_class = text_encoder_config.architectures[0]
-
     if model_class == "CLIPTextModel":
         from transformers import CLIPTextModel
-
         return CLIPTextModel
     elif model_class == "RobertaSeriesModelWithTransformation":
         from diffusers.pipelines.alt_diffusion.modeling_roberta_series import RobertaSeriesModelWithTransformation
-
         return RobertaSeriesModelWithTransformation
     else:
         raise ValueError(f"{model_class} is not supported.")
-
-
 def save_model_card(repo_id: str, image_logs=None, base_model=str, repo_folder=None):
     img_str = ""
     if image_logs is not None:
@@ -218,7 +178,6 @@ def save_model_card(repo_id: str, image_logs=None, base_model=str, repo_folder=N
             images = [validation_image] + images
             image_grid(images, 1, len(images)).save(os.path.join(repo_folder, f"images_{i}.png"))
             img_str += f"![images_{i})](./images_{i}.png)\n"
-
     yaml = f"""
 ---
 license: creativeml-openrail-m
@@ -234,14 +193,11 @@ inference: true
     """
     model_card = f"""
 # controlnet-{repo_id}
-
 These are controlnet weights trained on {base_model} with new type of conditioning.
 {img_str}
 """
     with open(os.path.join(repo_folder, "README.md"), "w") as f:
         f.write(yaml + model_card)
-
-
 def parse_args(input_args=None):
     parser = argparse.ArgumentParser(description="Simple example of a ControlNet training script.")
     parser.add_argument(
@@ -472,7 +428,7 @@ def parse_args(input_args=None):
         help=(
             "The path to the config file related to the dataset."
         ),
-    )    
+    )
     parser.add_argument(
         "--dataset_config_name",
         type=str,
@@ -567,27 +523,20 @@ def parse_args(input_args=None):
             " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"
         ),
     )
-
     if input_args is not None:
         args = parser.parse_args(input_args)
     else:
         args = parser.parse_args()
-
     if args.dataset_name is None and args.train_data_dir is None and args.dataset_config_path is None:
         raise ValueError("Specify either `--dataset_name` or `--train_data_dir` or `dataset_config_path`")
-
     if args.dataset_name is not None and args.train_data_dir is not None:
         raise ValueError("Specify only one of `--dataset_name` or `--train_data_dir`")
-
     if args.proportion_empty_prompts < 0 or args.proportion_empty_prompts > 1:
         raise ValueError("`--proportion_empty_prompts` must be in the range [0, 1].")
-
     if args.validation_prompt is not None and args.validation_image is None:
         raise ValueError("`--validation_image` must be set if `--validation_prompt` is set")
-
     if args.validation_prompt is None and args.validation_image is not None:
         raise ValueError("`--validation_prompt` must be set if `--validation_image` is set")
-
     if (
         args.validation_image is not None
         and args.validation_prompt is not None
@@ -599,42 +548,31 @@ def parse_args(input_args=None):
             "Must provide either 1 `--validation_image`, 1 `--validation_prompt`,"
             " or the same number of `--validation_prompt`s and `--validation_image`s"
         )
-
     if args.resolution % 8 != 0:
         raise ValueError(
             "`--resolution` must be divisible by 8 for consistently sized encoded images between the VAE and the controlnet encoder."
         )
-
     return args
-
 def collate_fn(examples):
     pixel_values = torch.stack([example["pixel_values"] for example in examples])
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-
     conditioning_pixel_values = torch.stack([example["conditioning_pixel_values"] for example in examples])
     conditioning_pixel_values = conditioning_pixel_values.to(memory_format=torch.contiguous_format).float()
-
     input_ids = torch.stack([example["input_ids"] for example in examples])
-
     return {
         "pixel_values": pixel_values,
         "conditioning_pixel_values": conditioning_pixel_values,
         "input_ids": input_ids,
     }
-
-
 def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
-
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir, logging_dir=logging_dir)
-
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
         project_config=accelerator_project_config,
     )
-
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -648,21 +586,17 @@ def main(args):
     else:
         transformers.utils.logging.set_verbosity_error()
         diffusers.utils.logging.set_verbosity_error()
-
     # If passed along, set the training seed now.
     if args.seed is not None:
         set_seed(args.seed)
-
     # Handle the repository creation
     if accelerator.is_main_process:
         if args.output_dir is not None:
             os.makedirs(args.output_dir, exist_ok=True)
-
         if args.push_to_hub:
             repo_id = create_repo(
                 repo_id=args.hub_model_id or Path(args.output_dir).name, exist_ok=True, token=args.hub_token
             ).repo_id
-
     # Load the tokenizer
     if args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, revision=args.revision, use_fast=False)
@@ -675,45 +609,38 @@ def main(args):
         )
     # import correct text encoder class
     text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
-
     # Load scheduler and models
     noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
     text_encoder = text_encoder_cls.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
     )
-
     vae = AutoencoderKL.from_pretrained(args.pretrained_vae_model_name_or_path, subfolder="vae", revision=args.revision)
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
     )
-
     if args.controlnet_model_name_or_path:
         logger.info("Loading existing controlnet weights")
         controlnet = ControlNetModel.from_pretrained(args.controlnet_model_name_or_path)
     else:
         logger.info("Initializing controlnet weights from unet")
-        controlnet = ControlNetModel.from_unet(unet, conditioning_embedding_out_channels=(64,128,256,)) 
-
+        controlnet = ControlNetModel.from_unet(unet, conditioning_embedding_out_channels=(64,128,256,))
     # `accelerate` 0.16.0 will have better support for customized saving
     if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
-        
+
         # 1. 커스텀 저장 훅 (Save Hook)
         def save_model_hook(models, weights, output_dir):
             while len(models) > 0:
                 model = models.pop()
                 if len(weights) > 0:
                     weights.pop()
-
                 if isinstance(model, ControlNetModel):
                     model.save_pretrained(os.path.join(output_dir, "controlnet"))
                 elif isinstance(model, SFT_Module):
                     sft_path = os.path.join(output_dir, "sft_weight.pth")
                     torch.save(model.state_dict(), sft_path)
-
         def load_model_hook(models, input_dir):
             while len(models) > 0:
                 model = models.pop()
-
                 if isinstance(model, ControlNetModel):
                     load_model = ControlNetModel.from_pretrained(input_dir, subfolder="controlnet")
                     model.register_to_config(**load_model.config)
@@ -726,21 +653,17 @@ def main(args):
                         logger.info("Successfully loaded SFT weights from checkpoint.")
                     else:
                         logger.warn("SFT weights not found in checkpoint!")
-
         accelerator.register_save_state_pre_hook(save_model_hook)
         accelerator.register_load_state_pre_hook(load_model_hook)
-
     of_model = raft_large(weights=Raft_Large_Weights.DEFAULT)
     of_model.requires_grad_(False)
     vae.requires_grad_(False)
     unet.requires_grad_(False)
     text_encoder.requires_grad_(False)
     controlnet.train()
-
     if args.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
             import xformers
-
             xformers_version = version.parse(xformers.__version__)
             if xformers_version == version.parse("0.0.16"):
                 logger.warn(
@@ -750,31 +673,25 @@ def main(args):
             controlnet.enable_xformers_memory_efficient_attention()
         else:
             raise ValueError("xformers is not available. Make sure it is installed correctly")
-
     if args.gradient_checkpointing:
         controlnet.enable_gradient_checkpointing()
-
     # Check that all trainable models are in full precision
     low_precision_error_string = (
         " Please make sure to always have all model weights in full float32 precision when starting training - even if"
         " doing mixed precision training, copy of the weights should still be float32."
     )
-
     if accelerator.unwrap_model(controlnet).dtype != torch.float32:
         raise ValueError(
             f"Controlnet loaded as datatype {accelerator.unwrap_model(controlnet).dtype}. {low_precision_error_string}"
         )
-
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
     if args.allow_tf32:
         torch.backends.cuda.matmul.allow_tf32 = True
-
     if args.scale_lr:
         args.learning_rate = (
             args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
         )
-
     # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
     if args.use_8bit_adam:
         try:
@@ -783,17 +700,15 @@ def main(args):
             raise ImportError(
                 "To use 8-bit Adam, please install the bitsandbytes library: `pip install bitsandbytes`."
             )
-
         optimizer_class = bnb.optim.AdamW8bit
     else:
         optimizer_class = torch.optim.AdamW
-    
+
     dtcwt_xfm = DTCWTForward(J=1, biort='near_sym_a', qshift='qshift_a').to(accelerator.device)
     dtcwt_xfm.requires_grad_(False) # DT-CWT는 파라미터 학습이 필요 없음
     dtcwt_inv = DTCWTInverse(biort='near_sym_a', qshift='qshift_a').to(accelerator.device)
-
     sft_module = SFT_Module(cond_channels=36, target_channels=320).to(accelerator.device)
-    
+
     # Optimizer creation
     params_to_optimize = list(controlnet.parameters()) + list(sft_module.parameters())
     optimizer = optimizer_class(
@@ -803,12 +718,9 @@ def main(args):
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon
     )
-
     # train_dataset = make_train_dataset(args, tokenizer, accelerator)
     dataset_opts = OmegaConf.load(args.dataset_config_path)
     train_dataset = REDSRecurrentDataset(dataset_opts['dataset']['train'])
-
-
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
@@ -816,14 +728,12 @@ def main(args):
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
     )
-
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
-
     lr_scheduler = get_scheduler(
         args.lr_scheduler,
         optimizer=optimizer,
@@ -832,12 +742,10 @@ def main(args):
         num_cycles=args.lr_num_cycles,
         power=args.lr_power,
     )
-
     # Prepare everything with our `accelerator`.
-    controlnet, sft_module,optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+    controlnet, sft_module, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         controlnet, sft_module, optimizer, train_dataloader, lr_scheduler
     )
-
     # For mixed precision training we cast the text_encoder and vae weights to half-precision
     # as these models are only used for inference, keeping weights in full precision is not required.
     weight_dtype = torch.float32
@@ -845,35 +753,27 @@ def main(args):
         weight_dtype = torch.float16
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
-
     # Move vae, unet and text_encoder to device and cast to weight_dtype
     vae.to(accelerator.device, dtype=weight_dtype)
     unet.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     of_model.to(accelerator.device, dtype=torch.float32)
-
-
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
-
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
         tracker_config = dict(vars(args))
-
         # tensorboard cannot handle list types for config
         tracker_config.pop("validation_prompt")
         tracker_config.pop("validation_image")
-
         accelerator.init_trackers(args.tracker_project_name, config=tracker_config)
-
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
-
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num batches each epoch = {len(train_dataloader)}")
@@ -884,7 +784,6 @@ def main(args):
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
     global_step = 0
     first_epoch = 0
-
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
         if args.resume_from_checkpoint != "latest":
@@ -895,7 +794,6 @@ def main(args):
             dirs = [d for d in dirs if d.startswith("checkpoint")]
             dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
             path = dirs[-1] if len(dirs) > 0 else None
-
         if path is None:
             accelerator.print(
                 f"Checkpoint '{args.resume_from_checkpoint}' does not exist. Starting a new training run."
@@ -906,12 +804,10 @@ def main(args):
             accelerator.print(f"Resuming from checkpoint {path}")
             accelerator.load_state(os.path.join(args.output_dir, path))
             global_step = int(path.split("-")[1])
-
             initial_global_step = global_step
             first_epoch = global_step // num_update_steps_per_epoch
     else:
         initial_global_step = 0
-
     progress_bar = tqdm(
         range(0, args.max_train_steps),
         initial=initial_global_step,
@@ -919,9 +815,7 @@ def main(args):
         # Only show the progress bar once on each machine.
         disable=not accelerator.is_local_main_process,
     )
-
     image_logs = None
-
     # get here input condition since it is fixed
     with torch.no_grad():
         tokenization = tokenizer([''] * args.train_batch_size, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt")
@@ -930,7 +824,7 @@ def main(args):
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(controlnet, sft_module):
                 # Prepare images
-                lq = batch['lq'] 
+                lq = batch['lq']
                 gt = batch['gt']
                 gt = 2 * gt - 1
                 lq = 2 * lq - 1
@@ -939,7 +833,7 @@ def main(args):
                 upscaled_lq = F.interpolate(upscaled_lq, scale_factor=4, mode='bicubic')
                 upscaled_lq = rearrange(upscaled_lq, '(b t) c h w -> b t c h w', b=b, t=t)
 
-                random_t = [round(random.random()) * 2 for _ in range(b)]
+                random_t = [random.choice([t//2 - 1, t//2 + 1]) for _ in range(b)]
                 gt_prev = torch.stack([gt[i, t_idx] for i, t_idx in enumerate(random_t)])
                 upscaled_lq_prev = torch.stack([upscaled_lq[i, t_idx] for i, t_idx in enumerate(random_t)])
                 lq_prev = torch.stack([lq[i, t_idx] for i, t_idx in enumerate(random_t)])
@@ -947,7 +841,6 @@ def main(args):
                 gt = gt[:, t // 2, ...]
                 lq = lq[:, t // 2, ...]
                 upscaled_lq_cur = upscaled_lq[:, t // 2, ...]
-
 
                 # Convert images to latent space
                 latents = vae.encode(gt.to(dtype=weight_dtype)).latent_dist.sample()
@@ -962,98 +855,67 @@ def main(args):
                 timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
                 timesteps = timesteps.long()
 
-                # Add noise to the latents according to the noise magnitude at each timestep
-                # (this is the forward diffusion process)
+                # Add noise to the latents according to the noise schedule
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
                 noisy_latents_cat = torch.cat([noisy_latents, lq], dim=1)
-
-                # Get the text embedding for conditioning
-                # tokenization = tokenizer('', max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt")
-                # encoder_hidden_states = text_encoder(tokenization)[0]
-
 
                 # make prediction of the previous frame
                 noise_prev = torch.randn_like(latents_prev)
                 noisy_latents_prev = noise_scheduler.add_noise(latents_prev, noise_prev, timesteps)
                 noisy_latents_prev_cat = torch.cat([noisy_latents_prev, lq_prev], dim=1)
-                # noise_level = torch.cat([torch.tensor([20], dtype=torch.long, device=accelerator.device)] * b)
 
                 model_pred_prev = unet(
                     noisy_latents_prev_cat,
                     timesteps,
-                    # class_labels = noise_level,
                     encoder_hidden_states=encoder_hidden_states.detach()
                 ).sample
                 approximated_x0_latent_prev = noise_scheduler.get_approximated_x0(model_pred_prev, timesteps, noisy_latents_prev)
                 approximated_x0_rgb_prev = vae.decode(approximated_x0_latent_prev / vae.config.scaling_factor).sample
 
-                # latents_prev_warped = compute_of_and_warp(of_model, upscaled_lq_cur, upscaled_lq_prev, latents_prev)
-                # controlnet_image = latents_prev_warped.to(dtype=weight_dtype)
-                
-                
                 f_flow = get_flow(of_model, upscaled_lq_prev.float(), upscaled_lq_cur.float())
                 warped_approximated_x0 = flow_warp(approximated_x0_rgb_prev, f_flow)
                 controlnet_image = warped_approximated_x0.to(dtype=weight_dtype).detach()
+
                 with torch.no_grad():
-                    # 1. 이전 프레임(x0 근사본)을 DT-CWT로 분리
-                    # Yl_prev: 저주파 [B, C, H_l, W_l], Yh_prev_list: 고주파
                     Yl_prev, Yh_prev_list = dtcwt_xfm(approximated_x0_rgb_prev)
-                    
-                    # 2. 고주파 계수를 RAFT Flow를 이용하여 위상 워핑 (Phase-Shift)
                     Yh_warped = warp_dtcwt_high_bands(Yh_prev_list, f_flow)
-                    
-                    # 3. SFT 모듈 입력에 맞게 텐서 형태 변환 (Flatten)
-                    # Yh_warped: [B, 3, 6, H_yh, W_yh, 2] -> [B, 36, H_yh, W_yh]
                     B, C, N_dir, H_yh, W_yh, _ = Yh_warped.shape
                     dtcwt_cond = Yh_warped.permute(0, 1, 2, 5, 3, 4).reshape(B, C * N_dir * 2, H_yh, W_yh)
                     dtcwt_cond = dtcwt_cond.to(dtype=weight_dtype)
-                # ==============================================================================
 
                 down_block_res_samples, mid_block_res_sample = controlnet(
                     noisy_latents_cat,
                     timesteps,
-                    # class_labels = noise_level,
                     encoder_hidden_states=encoder_hidden_states.detach(),
                     controlnet_cond=controlnet_image,
                     return_dict=False,
                 )
-# ==============================================================================
-                # [적용] Timestep-aware SFT Conditioning (x0 품질 필터링)
-                # ==============================================================================
-                T_COND_THRESH = 500  # 하이퍼파라미터: 이 timestep 미만에서만 SFT 텍스처 가이드 활성화
-                use_dtcwt_cond = (timesteps < T_COND_THRESH)  # [B] 크기의 Boolean 텐서
-                
+
+                # Timestep-aware SFT Conditioning
+                T_COND_THRESH = 200
+                use_dtcwt_cond = (timesteps < T_COND_THRESH)
+
                 modified_down_block_res_samples = []
                 for sample in down_block_res_samples:
-                    if sample.shape[1] == 320: # SFT_Module 타겟 채널
-                        # 1. 일단 SFT 모듈을 거친 정밀한 피처를 계산
+                    if sample.shape[1] == 320:
                         refined_sample = sft_module(sample, dtcwt_cond)
-                        
-                        # 2. 배치(Batch) 처리를 위한 마스크 텐서 생성 (디바이스 및 타입 맞춤!)
                         mask = use_dtcwt_cond.view(-1, 1, 1, 1).to(device=sample.device, dtype=sample.dtype)
-                        
-                        # 3. Timestep이 낮으면(mask=1) refined_sample 사용, 높으면(mask=0) 원본 sample 사용
                         final_sample = refined_sample * mask + sample * (1.0 - mask)
-                        
                         modified_down_block_res_samples.append(final_sample.to(dtype=weight_dtype))
                     else:
                         modified_down_block_res_samples.append(sample.to(dtype=weight_dtype))
-                # ==============================================================================
-                # ==============================================================================
-                
 
                 # Predict the noise residual
                 model_pred = unet(
                     noisy_latents_cat,
                     timesteps,
-                    # class_labels = noise_level,
                     encoder_hidden_states=encoder_hidden_states.detach(),
                     down_block_additional_residuals=[
                         sample.to(dtype=weight_dtype) for sample in modified_down_block_res_samples
                     ],
                     mid_block_additional_residual=mid_block_res_sample.to(dtype=weight_dtype),
                 ).sample
-                
+
                 # Get the target for loss depending on the prediction type
                 if noise_scheduler.config.prediction_type == "epsilon":
                     target = noise
@@ -1064,24 +926,24 @@ def main(args):
                 loss_diff = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                 approximated_x0_latent = noise_scheduler.get_approximated_x0(model_pred, timesteps, noisy_latents)
-                approximated_x0_latent = noise_scheduler.get_approximated_x0(model_pred, timesteps, noisy_latents)
                 approx_rgb = vae.decode(approximated_x0_latent / vae.config.scaling_factor).sample
-                
+
                 _, Yh_pred_rgb = dtcwt_xfm(approx_rgb.float())
-                
                 with torch.no_grad():
-
                     _, Yh_gt_rgb = dtcwt_xfm(gt.to(dtype=weight_dtype).float())
-
                 loss_wavelet = F.l1_loss(Yh_pred_rgb[0], Yh_gt_rgb[0])
-                
+
+                with torch.no_grad():
+                    backward_flow = get_flow(of_model, upscaled_lq_cur.float(), upscaled_lq_prev.float())
+                    warped_pred_back = flow_warp(approx_rgb, backward_flow)
+                loss_temporal = F.l1_loss(warped_pred_back, approximated_x0_rgb_prev.detach())
+
                 lambda_w_max = 0.1
                 warmup_steps = 2000
-                
                 current_lambda_w = lambda_w_max * min(1.0, global_step / warmup_steps)
-                
-                # 최종 Loss 계산
-                loss = loss_diff + current_lambda_w * loss_wavelet
+                lambda_t = 0.5
+
+                loss = loss_diff + current_lambda_w * loss_wavelet + lambda_t * loss_temporal
 
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
@@ -1096,73 +958,60 @@ def main(args):
                 progress_bar.update(1)
                 global_step += 1
 
-                # 1000스텝마다 상태 체크 및 저장
-                if global_step > 0 and global_step % 1000 == 0:
-                    if accelerator.is_main_process:
-                        print(f"\n--- [Step {global_step} Warping Stats Check] ---")
-                        orig_mean = Yh_prev_list[0].abs().mean().item()
-                        warp_mean = Yh_warped.abs().mean().item()
-                        print(f"Original Yh Mean: {orig_mean:.6f} | Warped Yh Mean: {warp_mean:.6f}")
+                # 1000스텝마다 디버그 로깅 (main process만)
+                if global_step % 1000 == 0 and accelerator.is_main_process:
+                    print(f"\n--- [Step {global_step} Warping Stats Check] ---")
+                    orig_mean = Yh_prev_list[0].abs().mean().item()
+                    warp_mean = Yh_warped.abs().mean().item()
+                    print(f"Original Yh Mean: {orig_mean:.6f} | Warped Yh Mean: {warp_mean:.6f}")
 
-                        with torch.no_grad():
-                            Yl_zero = torch.zeros_like(Yl_prev[0:1])
-                            edges_prev = dtcwt_inv((Yl_zero, [h[0:1] for h in Yh_prev_list]))
-                            edges_warped = dtcwt_inv((Yl_zero, [Yh_warped[0:1]]))
-                            _, Yh_gt_list_for_debug = dtcwt_xfm(gt[0:1].float())
-                            edges_gt = dtcwt_inv((Yl_zero, Yh_gt_list_for_debug))
+                    with torch.no_grad():
+                        Yl_zero = torch.zeros_like(Yl_prev[0:1])
+                        edges_prev = dtcwt_inv((Yl_zero, [h[0:1] for h in Yh_prev_list]))
+                        edges_warped = dtcwt_inv((Yl_zero, [Yh_warped[0:1]]))
+                        _, Yh_gt_list_for_debug = dtcwt_xfm(gt[0:1].float())
+                        edges_gt = dtcwt_inv((Yl_zero, Yh_gt_list_for_debug))
 
-                            debug_img = torch.cat([edges_prev[0], edges_warped[0], edges_gt[0]], dim=-1)
-                            vutils.save_image(debug_img, os.path.join(args.output_dir, f"debug_edges_{global_step}.png"), normalize=True)
+                        debug_img = torch.cat([edges_prev[0], edges_warped[0], edges_gt[0]], dim=-1)
+                        vutils.save_image(debug_img, os.path.join(args.output_dir, f"debug_edges_{global_step}.png"), normalize=True)
 
-                            error_before = F.l1_loss(Yh_prev_list[0], Yh_gt_list_for_debug[0]).item()
-                            error_after = F.l1_loss(Yh_warped[0], Yh_gt_list_for_debug[0]).item()
-                            print(f"{'='*50}")
-                            print(f"워핑 전 오차: {error_before:.4f} -> 워핑 후 오차: {error_after:.4f}")
-                            if error_after < error_before:
-                                improvement = (error_before - error_after) / error_before * 100
-                                print(f"결과: 워핑 성능 양호 ({improvement:.2f}% 개선)")
-                            else:
-                                print(f" 경고: 워핑 후 오차가 더 큼")
-                            print(f"{'='*50}\n")
+                        error_before = F.l1_loss(Yh_prev_list[0], Yh_gt_list_for_debug[0]).item()
+                        error_after = F.l1_loss(Yh_warped[0], Yh_gt_list_for_debug[0]).item()
+                        print(f"{'='*50}")
+                        print(f"워핑 전 오차: {error_before:.4f} -> 워핑 후 오차: {error_after:.4f}")
+                        if error_after < error_before:
+                            improvement = (error_before - error_after) / error_before * 100
+                            print(f"결과: 워핑 성능 양호 ({improvement:.2f}% 개선)")
+                        else:
+                            print(f" 경고: 워핑 후 오차가 더 큼")
+                        print(f"{'='*50}\n")
 
-                            accelerator.log({
-                                "warp_error_before": error_before,
-                                "warp_error_after": error_after,
-                                "lambda_w": current_lambda_w
-                            }, step=global_step)
+                        accelerator.log({
+                            "warp_error_before": error_before,
+                            "warp_error_after": error_after,
+                            "lambda_w": current_lambda_w
+                        }, step=global_step)
 
-                    # 모든 프로세스 동기화 후 체크포인트 저장
+                # 체크포인트 저장 (모든 프로세스 참여)
+                if global_step % args.checkpointing_steps == 0:
+                    if args.checkpoints_total_limit is not None and accelerator.is_main_process:
+                        checkpoints = os.listdir(args.output_dir)
+                        checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
+                        checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
+                        if len(checkpoints) >= args.checkpoints_total_limit:
+                            num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
+                            removing_checkpoints = checkpoints[0:num_to_remove]
+                            logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
+                            for removing_checkpoint in removing_checkpoints:
+                                shutil.rmtree(os.path.join(args.output_dir, removing_checkpoint))
+
                     accelerator.wait_for_everyone()
                     save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                     accelerator.save_state(save_path)
+                    logger.info(f"Saved state to {save_path}")
 
-                if accelerator.is_main_process:
-                    if global_step % args.checkpointing_steps == 0:
-                        # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
-                        if args.checkpoints_total_limit is not None:
-                            checkpoints = os.listdir(args.output_dir)
-                            checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
-                            checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
-
-                            # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
-                            if len(checkpoints) >= args.checkpoints_total_limit:
-                                num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
-                                removing_checkpoints = checkpoints[0:num_to_remove]
-
-                                logger.info(
-                                    f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints"
-                                )
-                                logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
-
-                                for removing_checkpoint in removing_checkpoints:
-                                    removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
-                                    shutil.rmtree(removing_checkpoint)
-
-                        save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                        accelerator.save_state(save_path)
-                        logger.info(f"Saved state to {save_path}")
-
-                    if args.validation_prompt is not None and global_step % args.validation_steps == 0:
+                if args.validation_prompt is not None and global_step % args.validation_steps == 0:
+                    if accelerator.is_main_process:
                         image_logs = log_validation(
                             vae,
                             text_encoder,
@@ -1177,18 +1026,18 @@ def main(args):
                         )
 
             logs = {
-                "loss": loss.detach().item(), 
+                "loss": loss.detach().item(),
                 "loss_diff": loss_diff.detach().item(),
                 "loss_wavelet": loss_wavelet.detach().item(),
+                "loss_temporal": loss_temporal.detach().item(),
                 "lr": lr_scheduler.get_last_lr()[0]
             }
             progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
-
             if global_step >= args.max_train_steps:
                 break
 
-    # Create the pipeline using using the trained modules and save it.
+    # Create the pipeline using the trained modules and save it.
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         controlnet = accelerator.unwrap_model(controlnet)
@@ -1209,10 +1058,7 @@ def main(args):
                 commit_message="End of training",
                 ignore_patterns=["step_*", "epoch_*"],
             )
-
     accelerator.end_training()
-
-
 if __name__ == "__main__":
     args = parse_args()
     main(args)
