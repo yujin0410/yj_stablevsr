@@ -878,7 +878,9 @@ def main(args):
 
                 with torch.no_grad():
                     Yl_prev, Yh_prev_list = dtcwt_xfm(approximated_x0_rgb_prev)
-                    Yh_warped = warp_dtcwt_high_bands(Yh_prev_list, f_flow)
+                    # warp_dtcwt_high_bands expects (B, 2, H, W) but get_flow returns (B, H, W, 2)
+                    f_flow_chw = f_flow.permute(0, 3, 1, 2)
+                    Yh_warped = warp_dtcwt_high_bands(Yh_prev_list, f_flow_chw)
                     B, C, N_dir, H_yh, W_yh, _ = Yh_warped.shape
                     dtcwt_cond = Yh_warped.permute(0, 1, 2, 5, 3, 4).reshape(B, C * N_dir * 2, H_yh, W_yh)
                     dtcwt_cond = dtcwt_cond.to(dtype=weight_dtype)
