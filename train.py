@@ -1082,55 +1082,7 @@ def main(args):
                 
                 # 최종 Loss 계산
                 loss = loss_diff + current_lambda_w * loss_wavelet
-                # [수정] 1000스텝마다 상태 체크 및 저장 (학습은 계속 진행)
-                if global_step > 0 and global_step % 1000 == 0:
-                    if accelerator.is_main_process:
-                        print(f"\n--- [Step {global_step} Warping Stats Check] ---")
-                        # 1. 텐서 에너지 보존 확인
-                        orig_mean = Yh_prev_list[0].abs().mean().item()
-                        warp_mean = Yh_warped.abs().mean().item()
-                        print(f"Original Yh Mean: {orig_mean:.6f} | Warped Yh Mean: {warp_mean:.6f}")
-                        
-                        with torch.no_grad():
-                            # 2. 역변환 이미지 생성 (메모리 절약을 위해 배치 0번만 사용 권장)
-                            Yl_zero = torch.zeros_like(Yl_prev[0:1])
-                            edges_prev = dtcwt_inv((Yl_zero, [h[0:1] for h in Yh_prev_list]))
-                            edges_warped = dtcwt_inv((Yl_zero, [Yh_warped[0:1]]))
-                            
-                            _, Yh_gt_list_for_debug = dtcwt_xfm(gt[0:1].float()) 
-                            edges_gt = dtcwt_inv((Yl_zero, Yh_gt_list_for_debug))
-                        
-                            # 3. 디버그 이미지 저장 (덮어쓰지 않도록 스텝 번호 부여 추천)
-                            debug_img = torch.cat([edges_prev[0], edges_warped[0], edges_gt[0]], dim=-1)
-                            vutils.save_image(debug_img, os.path.join(args.output_dir, f"debug_edges_{global_step}.png"), normalize=True)
-                            
-                            # 4. 오차 계산 및 출력
-                            error_before = F.l1_loss(Yh_prev_list[0], Yh_gt_list_for_debug[0]).item()
-                            error_after = F.l1_loss(Yh_warped[0], Yh_gt_list_for_debug[0]).item()
-                            
-                            print(f"="*50)
-                            print(f"워핑 전 오차: {error_before:.4f} -> 워핑 후 오차: {error_after:.4f}")
-                            if error_after < error_before:
-                                improvement = (error_before - error_after) / error_before * 100
-                                print(f"결과: 워핑 성능 양호 ({improvement:.2f}% 개선)")
-                            else:
-                                print(f" 경고: 워핑 후 오차가 더 큼 (학습 중반 이후에도 이렇다면 방향 점검 필요)")
-                            print(f"="*50 + "\n")
 
-                            # WandB 등을 사용 중이라면 수치 로깅
-                            accelerator.log({
-                                "warp_error_before": error_before,
-                                "warp_error_after": error_after,
-                                "lambda_w": current_lambda_w
-                            }, step=global_step)
-
-                    # 5. 체크포인트 저장 (모든 프로세스 동기화 필요)
-                    accelerator.wait_for_everyone()
-                    save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                    accelerator.save_state(save_path)
-                    
-                    # [중요] 기존에 있던 sys.exit(0) 섹션은 삭제했습니다. 학습이 중단 없이 계속됩니다.
-                # ==============================================================================
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
                     params_to_clip = list(controlnet.parameters()) + list(sft_module.parameters())
@@ -1143,6 +1095,46 @@ def main(args):
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 global_step += 1
+
+                # 1000스텝마다 상태 체크 및 저장
+                if global_step > 0 and global_step % 1000 == 0:
+                    if accelerator.is_main_process:
+                        print(f"\n--- [Step {global_step} Warping Stats Check] ---")
+                        orig_mean = Yh_prev_list[0].abs().mean().item()
+                        warp_mean = Yh_warped.abs().mean().item()
+                        print(f"Original Yh Mean: {orig_mean:.6f} | Warped Yh Mean: {warp_mean:.6f}")
+
+                        with torch.no_grad():
+                            Yl_zero = torch.zeros_like(Yl_prev[0:1])
+                            edges_prev = dtcwt_inv((Yl_zero, [h[0:1] for h in Yh_prev_list]))
+                            edges_warped = dtcwt_inv((Yl_zero, [Yh_warped[0:1]]))
+                            _, Yh_gt_list_for_debug = dtcwt_xfm(gt[0:1].float())
+                            edges_gt = dtcwt_inv((Yl_zero, Yh_gt_list_for_debug))
+
+                            debug_img = torch.cat([edges_prev[0], edges_warped[0], edges_gt[0]], dim=-1)
+                            vutils.save_image(debug_img, os.path.join(args.output_dir, f"debug_edges_{global_step}.png"), normalize=True)
+
+                            error_before = F.l1_loss(Yh_prev_list[0], Yh_gt_list_for_debug[0]).item()
+                            error_after = F.l1_loss(Yh_warped[0], Yh_gt_list_for_debug[0]).item()
+                            print(f"{'='*50}")
+                            print(f"워핑 전 오차: {error_before:.4f} -> 워핑 후 오차: {error_after:.4f}")
+                            if error_after < error_before:
+                                improvement = (error_before - error_after) / error_before * 100
+                                print(f"결과: 워핑 성능 양호 ({improvement:.2f}% 개선)")
+                            else:
+                                print(f" 경고: 워핑 후 오차가 더 큼")
+                            print(f"{'='*50}\n")
+
+                            accelerator.log({
+                                "warp_error_before": error_before,
+                                "warp_error_after": error_after,
+                                "lambda_w": current_lambda_w
+                            }, step=global_step)
+
+                    # 모든 프로세스 동기화 후 체크포인트 저장
+                    accelerator.wait_for_everyone()
+                    save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                    accelerator.save_state(save_path)
 
                 if accelerator.is_main_process:
                     if global_step % args.checkpointing_steps == 0:
