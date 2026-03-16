@@ -879,10 +879,8 @@ def main(args):
                 controlnet_image = warped_approximated_x0.to(dtype=weight_dtype).detach()
 
                 with torch.no_grad():
-                    Yl_prev, Yh_prev_list = dtcwt_xfm(approximated_x0_rgb_prev)
-                    # warp_dtcwt_high_bands expects (B, 2, H, W) but get_flow returns (B, H, W, 2)
-                    f_flow_chw = f_flow.permute(0, 3, 1, 2)
-                    Yh_warped = warp_dtcwt_high_bands(Yh_prev_list, f_flow_chw)
+                    _, Yh_warped_list = dtcwt_xfm(warped_approximated_x0.float())
+                    Yh_warped = Yh_warped_list[0]  # level 1: (B, C, 6, H/2, W/2, 2)
                     B, C, N_dir, H_yh, W_yh, _ = Yh_warped.shape
                     dtcwt_cond = Yh_warped.permute(0, 1, 2, 5, 3, 4).reshape(B, C * N_dir * 2, H_yh, W_yh)
                     dtcwt_cond = dtcwt_cond.to(dtype=weight_dtype)
@@ -966,13 +964,13 @@ def main(args):
                 if global_step % 1000 == 0 and accelerator.is_main_process:
                     cur_t = timesteps[0].item()
                     print(f"\n--- [Step {global_step} Warping Stats Check] (timestep[0]={cur_t}, T_THRESH=200) ---")
-                    orig_mean = Yh_prev_list[0].abs().mean().item()
                     warp_mean = Yh_warped.abs().mean().item()
-                    print(f"Original Yh Mean: {orig_mean:.6f} | Warped Yh Mean: {warp_mean:.6f}")
+                    print(f"Warped Yh Mean: {warp_mean:.6f}")
 
                     with torch.no_grad():
-                        Yl_zero = torch.zeros_like(Yl_prev[0:1])
-                        edges_prev = dtcwt_inv((Yl_zero, [h[0:1] for h in Yh_prev_list]))
+                        Yl_prev_dbg, Yh_prev_list_dbg = dtcwt_xfm(approximated_x0_rgb_prev[0:1].float())
+                        Yl_zero = torch.zeros_like(Yl_prev_dbg)
+                        edges_prev = dtcwt_inv((Yl_zero, [h for h in Yh_prev_list_dbg]))
                         edges_warped = dtcwt_inv((Yl_zero, [Yh_warped[0:1]]))
                         _, Yh_gt_list_for_debug = dtcwt_xfm(gt[0:1].float())
                         edges_gt = dtcwt_inv((Yl_zero, Yh_gt_list_for_debug))
@@ -980,7 +978,7 @@ def main(args):
                         debug_img = torch.cat([edges_prev[0], edges_warped[0], edges_gt[0]], dim=-1)
                         vutils.save_image(debug_img, os.path.join(args.output_dir, f"debug_edges_{global_step}.png"), normalize=True)
 
-                        error_before = F.l1_loss(Yh_prev_list[0], Yh_gt_list_for_debug[0]).item()
+                        error_before = F.l1_loss(Yh_prev_list_dbg[0], Yh_gt_list_for_debug[0]).item()
                         error_after = F.l1_loss(Yh_warped[0], Yh_gt_list_for_debug[0]).item()
                         print(f"{'='*50}")
                         print(f"워핑 전 오차: {error_before:.4f} -> 워핑 후 오차: {error_after:.4f}")
