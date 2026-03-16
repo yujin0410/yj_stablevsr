@@ -633,23 +633,25 @@ def main(args):
                 model = models.pop()
                 if len(weights) > 0:
                     weights.pop()
-                if isinstance(model, ControlNetModel):
-                    model.save_pretrained(os.path.join(output_dir, "controlnet"))
-                elif isinstance(model, SFT_Module):
+                unwrapped = accelerator.unwrap_model(model)
+                if isinstance(unwrapped, ControlNetModel):
+                    unwrapped.save_pretrained(os.path.join(output_dir, "controlnet"))
+                elif isinstance(unwrapped, SFT_Module):
                     sft_path = os.path.join(output_dir, "sft_weight.pth")
-                    torch.save(model.state_dict(), sft_path)
+                    torch.save(unwrapped.state_dict(), sft_path)
         def load_model_hook(models, input_dir):
             while len(models) > 0:
                 model = models.pop()
-                if isinstance(model, ControlNetModel):
+                unwrapped = accelerator.unwrap_model(model)
+                if isinstance(unwrapped, ControlNetModel):
                     load_model = ControlNetModel.from_pretrained(input_dir, subfolder="controlnet")
-                    model.register_to_config(**load_model.config)
-                    model.load_state_dict(load_model.state_dict())
+                    unwrapped.register_to_config(**load_model.config)
+                    unwrapped.load_state_dict(load_model.state_dict())
                     del load_model
-                elif isinstance(model, SFT_Module):
+                elif isinstance(unwrapped, SFT_Module):
                     sft_path = os.path.join(input_dir, "sft_weight.pth")
                     if os.path.exists(sft_path):
-                        model.load_state_dict(torch.load(sft_path, map_location="cpu"))
+                        unwrapped.load_state_dict(torch.load(sft_path, map_location="cpu"))
                         logger.info("Successfully loaded SFT weights from checkpoint.")
                     else:
                         logger.warn("SFT weights not found in checkpoint!")
