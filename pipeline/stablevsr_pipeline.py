@@ -981,7 +981,8 @@ class StableVSRPipeline(
                         if sft_module is not None and dtcwt_xfm is not None:
                             with torch.no_grad():
                                 Yl_lq, Yh_lq_list = dtcwt_xfm(upscaled_images[num_image - 1].float())
-                                Yh_warped = warp_dtcwt_high_bands(Yh_lq_list, f_flow_cur.float())
+                                f_flow_chw = f_flow_cur.permute(0, 3, 1, 2)  # (B,H,W,2) → (B,2,H,W)
+                                Yh_warped = warp_dtcwt_high_bands(Yh_lq_list, f_flow_chw.float())
                                 
                                 B_dim, C_dim, N_dir, H_yh, W_yh, _ = Yh_warped.shape
                                 dtcwt_cond = Yh_warped.permute(0, 1, 2, 5, 3, 4).reshape(B_dim, C_dim * N_dir * 2, H_yh, W_yh)
