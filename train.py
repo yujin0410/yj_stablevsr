@@ -44,6 +44,7 @@ from util.flow_utils import get_flow, flow_warp
 from pytorch_wavelets import DTCWTForward, DTCWTInverse
 import torchvision.utils as vutils
 from models.sft import SFT_Module
+from util.dtcwt_warp import warp_dtcwt_high_bands
 import wandb
 import diffusers
 from diffusers import (
@@ -878,8 +879,9 @@ def main(args):
                 controlnet_image = warped_approximated_x0.to(dtype=weight_dtype).detach()
 
                 with torch.no_grad():
-                    _, Yh_warped_list = dtcwt_xfm(warped_approximated_x0.float())
-                    Yh_warped = Yh_warped_list[0]  # level 1: (B, C, 6, H/2, W/2, 2)
+                    Yl_prev, Yh_prev_list = dtcwt_xfm(approximated_x0_rgb_prev)
+                    f_flow_chw = f_flow.permute(0, 3, 1, 2)  # (B,H,W,2) → (B,2,H,W)
+                    Yh_warped = warp_dtcwt_high_bands(Yh_prev_list, f_flow_chw)
                     B, C, N_dir, H_yh, W_yh, _ = Yh_warped.shape
                     dtcwt_cond = Yh_warped.permute(0, 1, 2, 5, 3, 4).reshape(B, C * N_dir * 2, H_yh, W_yh)
                     dtcwt_cond = dtcwt_cond.to(dtype=weight_dtype)
@@ -963,13 +965,13 @@ def main(args):
                 if global_step % 1000 == 0 and accelerator.is_main_process:
                     cur_t = timesteps[0].item()
                     print(f"\n--- [Step {global_step} Warping Stats Check] (timestep[0]={cur_t}, T_THRESH=200) ---")
+                    orig_mean = Yh_prev_list[0].abs().mean().item()
                     warp_mean = Yh_warped.abs().mean().item()
-                    print(f"Warped Yh Mean: {warp_mean:.6f}")
+                    print(f"Original Yh Mean: {orig_mean:.6f} | Warped Yh Mean: {warp_mean:.6f}")
 
                     with torch.no_grad():
-                        Yl_prev_dbg, Yh_prev_list_dbg = dtcwt_xfm(approximated_x0_rgb_prev[0:1].float())
-                        Yl_zero = torch.zeros_like(Yl_prev_dbg)
-                        edges_prev = dtcwt_inv((Yl_zero, [h for h in Yh_prev_list_dbg]))
+                        Yl_zero = torch.zeros_like(Yl_prev[0:1])
+                        edges_prev = dtcwt_inv((Yl_zero, [h[0:1] for h in Yh_prev_list]))
                         edges_warped = dtcwt_inv((Yl_zero, [Yh_warped[0:1]]))
                         _, Yh_gt_list_for_debug = dtcwt_xfm(gt[0:1].float())
                         edges_gt = dtcwt_inv((Yl_zero, Yh_gt_list_for_debug))

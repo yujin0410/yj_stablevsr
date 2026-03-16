@@ -41,6 +41,7 @@ from diffusers.pipelines import DiffusionPipeline
 from diffusers.pipelines.controlnet import MultiControlNetModel
 import util.flow_utils as of
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput, StableDiffusionSafetyChecker
+from util.dtcwt_warp import warp_dtcwt_high_bands
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -978,8 +979,9 @@ class StableVSRPipeline(
                         
                         if sft_module is not None and dtcwt_xfm is not None:
                             with torch.no_grad():
-                                _, Yh_warped_list = dtcwt_xfm(warped_prev_est.float())
-                                Yh_warped = Yh_warped_list[0]  # level 1: (B, C, 6, H/2, W/2, 2)
+                                _, Yh_prev_list = dtcwt_xfm(x0_est.float())
+                                f_flow_chw = f_flow_cur.permute(0, 3, 1, 2)  # (B,H,W,2) → (B,2,H,W)
+                                Yh_warped = warp_dtcwt_high_bands(Yh_prev_list, f_flow_chw.float())
                                 B_dim, C_dim, N_dir, H_yh, W_yh, _ = Yh_warped.shape
                                 dtcwt_cond = Yh_warped.permute(0, 1, 2, 5, 3, 4).reshape(B_dim, C_dim * N_dir * 2, H_yh, W_yh)
                                 dtcwt_cond = dtcwt_cond.to(dtype=self.unet.dtype)
