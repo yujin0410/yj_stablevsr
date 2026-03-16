@@ -1,4 +1,3 @@
-# models/sft.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,11 +19,15 @@ class SFT_Module(nn.Module):
 
     def forward(self, feature, condition):
         shared = self.shared_conv(condition)
-        gamma = torch.tanh(self.conv_gamma(shared)) * 0.1
-        beta  = torch.tanh(self.conv_beta(shared))  * 0.1
+
+        gamma = self.conv_gamma(shared)
+        beta  = self.conv_beta(shared)
 
         if feature.shape[2:] != gamma.shape[2:]:
             gamma = F.interpolate(gamma, size=feature.shape[2:], mode='bilinear', align_corners=False)
             beta  = F.interpolate(beta,  size=feature.shape[2:], mode='bilinear', align_corners=False)
+
+        gamma = torch.tanh(gamma) * 0.1
+        beta  = torch.tanh(beta)  * 0.1
 
         return feature * (1 + gamma) + beta
