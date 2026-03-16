@@ -879,7 +879,7 @@ def main(args):
                 controlnet_image = warped_approximated_x0.to(dtype=weight_dtype).detach()
 
                 with torch.no_grad():
-                    Yl_prev, Yh_prev_list = dtcwt_xfm(approximated_x0_rgb_prev)
+                    Yl_prev, Yh_prev_list = dtcwt_xfm(approximated_x0_rgb_prev.float())
                     f_flow_chw = f_flow.permute(0, 3, 1, 2)  # (B,H,W,2) → (B,2,H,W)
                     Yh_warped = warp_dtcwt_high_bands(Yh_prev_list, f_flow_chw)
                     B, C, N_dir, H_yh, W_yh, _ = Yh_warped.shape
@@ -979,8 +979,8 @@ def main(args):
                         debug_img = torch.cat([edges_prev[0], edges_warped[0], edges_gt[0]], dim=-1)
                         vutils.save_image(debug_img, os.path.join(args.output_dir, f"debug_edges_{global_step}.png"), normalize=True)
 
-                        error_before = F.l1_loss(Yh_prev_list_dbg[0], Yh_gt_list_for_debug[0]).item()
-                        error_after = F.l1_loss(Yh_warped[0], Yh_gt_list_for_debug[0]).item()
+                        error_before = F.l1_loss(Yh_prev_list[0][0:1], Yh_gt_list_for_debug[0]).item()
+                        error_after = F.l1_loss(Yh_warped[0:1], Yh_gt_list_for_debug[0]).item()
                         print(f"{'='*50}")
                         print(f"워핑 전 오차: {error_before:.4f} -> 워핑 후 오차: {error_after:.4f}")
                         if error_after < error_before:
