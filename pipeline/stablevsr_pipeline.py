@@ -1025,7 +1025,7 @@ class StableVSRPipeline(
                             timestep_cond=None
                         )
                         if sft_module is not None and dtcwt_cond is not None:
-                            T_COND_THRESH = 500  
+                            T_COND_THRESH = 200
                             current_t = t.item() if hasattr(t, 'item') else t
                             use_dtcwt_cond = (current_t < T_COND_THRESH)
                             
