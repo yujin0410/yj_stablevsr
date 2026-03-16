@@ -874,7 +874,7 @@ def main(args):
                 approximated_x0_latent_prev = noise_scheduler.get_approximated_x0(model_pred_prev, timesteps, noisy_latents_prev)
                 approximated_x0_rgb_prev = vae.decode(approximated_x0_latent_prev / vae.config.scaling_factor).sample
 
-                f_flow = get_flow(of_model, upscaled_lq_prev.float(), upscaled_lq_cur.float())
+                f_flow = get_flow(of_model, upscaled_lq_cur.float(), upscaled_lq_prev.float())
                 warped_approximated_x0 = flow_warp(approximated_x0_rgb_prev, f_flow)
                 controlnet_image = warped_approximated_x0.to(dtype=weight_dtype).detach()
 
@@ -938,9 +938,9 @@ def main(args):
                 loss_wavelet = F.l1_loss(Yh_pred_rgb[0], Yh_gt_rgb[0])
 
                 with torch.no_grad():
-                    backward_flow = get_flow(of_model, upscaled_lq_cur.float(), upscaled_lq_prev.float())
-                    warped_pred_back = flow_warp(approx_rgb, backward_flow)
-                loss_temporal = F.l1_loss(warped_pred_back, approximated_x0_rgb_prev.detach())
+                    backward_flow = get_flow(of_model, approx_rgb.float(), approximated_x0_rgb_prev.float())
+                warped_prev_to_cur = flow_warp(approximated_x0_rgb_prev, backward_flow)
+                loss_temporal = F.l1_loss(approx_rgb, warped_prev_to_cur.detach())
 
                 lambda_w_max = 0.1
                 warmup_steps = 2000
