@@ -37,7 +37,9 @@ def warp_dtcwt_high_bands(Yh_list, flow):
     warped_coeffs = []
     for d in range(6):
         wx, wy = center_freqs[d]
-        delta_phi = -(wx * u + wy * v).to(dtype=Yh_L1.dtype)
+        # u, v are in subband pixels (level 1: 1 subband px = 2 original px)
+        # DTCWT steering property requires displacement in original pixels: d = 2 * u_subband
+        delta_phi = -(wx * 2 * u + wy * 2 * v).to(dtype=Yh_L1.dtype)
         cos_d = torch.cos(delta_phi)  # [B, 1, H, W]
         sin_d = torch.sin(delta_phi)
 
