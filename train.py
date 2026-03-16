@@ -869,7 +869,7 @@ def main(args):
                 model_pred_prev = unet(
                     noisy_latents_prev_cat,
                     timesteps,
-                    encoder_hidden_states=encoder_hidden_states.detach()
+                    encoder_hidden_states=encoder_hidden_states[:bsz].detach()
                 ).sample
                 approximated_x0_latent_prev = noise_scheduler.get_approximated_x0(model_pred_prev, timesteps, noisy_latents_prev)
                 approximated_x0_rgb_prev = vae.decode(approximated_x0_latent_prev / vae.config.scaling_factor).sample
@@ -890,7 +890,7 @@ def main(args):
                 down_block_res_samples, mid_block_res_sample = controlnet(
                     noisy_latents_cat,
                     timesteps,
-                    encoder_hidden_states=encoder_hidden_states.detach(),
+                    encoder_hidden_states=encoder_hidden_states[:bsz].detach(),
                     controlnet_cond=controlnet_image,
                     return_dict=False,
                 )
@@ -913,7 +913,7 @@ def main(args):
                 model_pred = unet(
                     noisy_latents_cat,
                     timesteps,
-                    encoder_hidden_states=encoder_hidden_states.detach(),
+                    encoder_hidden_states=encoder_hidden_states[:bsz].detach(),
                     down_block_additional_residuals=[
                         sample.to(dtype=weight_dtype) for sample in modified_down_block_res_samples
                     ],
