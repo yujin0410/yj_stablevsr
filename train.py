@@ -934,7 +934,9 @@ def main(args):
                 _, Yh_pred_rgb = dtcwt_xfm(approx_rgb.float())
                 with torch.no_grad():
                     _, Yh_gt_rgb = dtcwt_xfm(gt.to(dtype=weight_dtype).float())
-                loss_wavelet = F.l1_loss(Yh_pred_rgb[0], Yh_gt_rgb[0])
+                t_weight = (1.0 - timesteps.float() / noise_scheduler.config.num_train_timesteps)
+                loss_wavelet = (F.l1_loss(Yh_pred_rgb[0], Yh_gt_rgb[0], reduction='none')
+                                * t_weight.view(-1, 1, 1, 1, 1, 1)).mean()
 
                 with torch.no_grad():
                     backward_flow = get_flow(of_model, approx_rgb.float(), approximated_x0_rgb_prev.float())
@@ -944,7 +946,9 @@ def main(args):
                 lambda_w_max = 0.1
                 warmup_steps = 2000
                 current_lambda_w = lambda_w_max * min(1.0, global_step / warmup_steps)
-                lambda_t = 0.5
+                lambda_t_start = 0.5
+                lambda_t_end = 0.1
+                lambda_t = max(lambda_t_end, lambda_t_start - (lambda_t_start - lambda_t_end) * global_step / 20000)
 
                 loss = loss_diff + current_lambda_w * loss_wavelet + lambda_t * loss_temporal
 
