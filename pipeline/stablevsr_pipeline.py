@@ -41,8 +41,6 @@ from diffusers.pipelines import DiffusionPipeline
 from diffusers.pipelines.controlnet import MultiControlNetModel
 import util.flow_utils as of
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput, StableDiffusionSafetyChecker
-from util.dtcwt_warp import warp_dtcwt_high_bands
-
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
