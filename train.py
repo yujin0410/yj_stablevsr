@@ -941,10 +941,11 @@ def main(args):
                 with torch.no_grad():
                     backward_flow = get_flow(of_model, approx_rgb.float(), approximated_x0_rgb_prev.float())
                 warped_prev_to_cur = flow_warp(approximated_x0_rgb_prev, backward_flow)
-                loss_temporal = F.l1_loss(approx_rgb, warped_prev_to_cur.detach())
+                loss_temporal_raw = F.l1_loss(approx_rgb, warped_prev_to_cur.detach(), reduction='none').mean(dim=[1, 2, 3])
+                loss_temporal = (loss_temporal_raw * t_weight).mean()
 
-                lambda_w_max = 0.1
-                warmup_steps = 2000
+                lambda_w_max = 0.5
+                warmup_steps = 1000
                 current_lambda_w = lambda_w_max * min(1.0, global_step / warmup_steps)
                 lambda_t_start = 0.5
                 lambda_t_end = 0.1
